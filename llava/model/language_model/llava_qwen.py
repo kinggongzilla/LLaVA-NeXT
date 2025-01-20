@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple, Union, Dict
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
+from llava.constants import IMAGE_TOKEN_INDEX
 
 import transformers
 from transformers import AutoConfig, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaForCausalLM
@@ -36,12 +37,12 @@ class LlavaQwenConfig(Qwen2Config):
     model_type = "llava_qwen"
 
 
-class LlavaQwenModel(LlavaMetaModel, Qwen2Model):
+from .fastv_kvcache import FastVQwen2Model
+class LlavaQwenModel(LlavaMetaModel, FastVQwen2Model):
     config_class = LlavaQwenConfig
 
     def __init__(self, config: Qwen2Config):
         super(LlavaQwenModel, self).__init__(config)
-
 
 class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaQwenConfig
@@ -76,6 +77,8 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         return_dict: Optional[bool] = None,
         modalities: Optional[List[str]] = ["image"],
         dpo_forward: Optional[bool] = False,
+        num_image_tokens_per_image=None, 
+        image_token_indices_for_each_batch=None,
         cache_position=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
@@ -93,6 +96,8 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
+                num_image_tokens_per_image=num_image_tokens_per_image,
+                image_token_indices=image_token_indices,
             )
 
             hidden_states = outputs[0]
@@ -111,6 +116,10 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
+                # Begin custom David code
+                num_image_tokens_per_image=num_image_tokens_per_image,
+                image_token_indices_for_each_batch=image_token_indices_for_each_batch,
+                # End custom David code
             )
 
     @torch.no_grad()
@@ -128,11 +137,11 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             raise NotImplementedError("`inputs_embeds` is not supported")
 
         if images is not None:
-            (inputs, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_multimodal(inputs, position_ids, attention_mask, None, None, images, modalities, image_sizes=image_sizes)
+            (inputs, position_ids, attention_mask, _, inputs_embeds, _, num_image_tokens_per_image, image_token_indices_for_each_batch) = self.prepare_inputs_labels_for_multimodal(inputs, position_ids, attention_mask, None, None, images, modalities, image_sizes=image_sizes)
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
-        return super().generate(position_ids=position_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
+        return super().generate(position_ids=position_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds, num_image_tokens_per_image=num_image_tokens_per_image, image_token_indices_for_each_batch=image_token_indices_for_each_batch, **kwargs)
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
         images = kwargs.pop("images", None)

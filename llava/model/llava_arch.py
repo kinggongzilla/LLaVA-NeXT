@@ -414,7 +414,7 @@ class LlavaMetaForCausalLM(ABC):
             else:
                 raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
-            image_features = self.encode_images(images)
+            image_features = self.encode_images(images) # (num_images, number_of_image_tokens, embedding_size)
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, "tune_mm_mlp_adapter", False) and getattr(self.config, "mm_use_im_start_end", False):
@@ -446,6 +446,10 @@ class LlavaMetaForCausalLM(ABC):
         new_labels = []
         cur_image_idx = 0
         # rank_print("Inserting Images embedding")
+        # Begin David Code
+        image_token_indices_for_each_batch = []
+        num_image_tokens_per_image = image_features[0].shape[0] #TODO: david does this work if multiple images in different sizes are added??
+        # End David Code
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
             # rank0_print(num_images)
@@ -459,6 +463,9 @@ class LlavaMetaForCausalLM(ABC):
                 continue
 
             image_token_indices = [-1] + torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [cur_input_ids.shape[0]]
+            # Begin David Code
+            image_token_indices_for_each_batch.append(image_token_indices)
+            # End David Code
             cur_input_ids_noim = []
             cur_labels = labels[batch_idx]
             cur_labels_noim = []
@@ -552,6 +559,9 @@ class LlavaMetaForCausalLM(ABC):
             position_ids[:, split_position:] += right_add
         # import pdb; pdb.set_trace()
         # rank0_print("Finish preparing")
+
+        if num_image_tokens_per_image is not None:
+            return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, num_image_tokens_per_image, image_token_indices_for_each_batch
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):
